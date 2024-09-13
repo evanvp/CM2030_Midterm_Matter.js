@@ -1,0 +1,621 @@
+//OVERVIEW
+//This simulated snooker game is a simplified version powered by Matter.js
+//with table and cuestick are written in regular p5 function, and other elements
+//such as balls and cushions are written as matter.js objects. 
+
+//HUMAN INTERACTION
+//The cuestick is mainly controled by mouse event:
+//the mousePressed() triggers the cuestick to be drawn based on MouseX/MouseY,
+//the mouseDragged() will give back updated MouseX/MouseY so the cuestick will
+//move following the mouse movement,
+//and finally the mouseReleased() will set cuestick to null, stopping drawing the stick
+
+//CueBall drawing is controlled by keyPressed() and collision detection functions,
+//which would allow human interacts with the app to do the cueball placement, 
+//and with the restriction applied by collision detection would avoid unwanted cueball position.
+
+//Gamemode changing is also controled by keyPressed().
+//Depends on the key pressed (1 or 2 or 3), the game will change accordingly
+//and set everything to the start of a game. 
+
+
+//PHYSIC LOGIC BEHIND
+//Matter.js is powerful physic engine allows just simple codes but powerful results.
+//My balls (red, coloured, cue) share the similar Matter.Bodies parameter as 
+//they are supposed to be equal in restitution and friction, and of course mass and size.
+
+//For the cushions, they are powered by Matter.js as well, which I give them the restitution of 1.
+//Also, they are set to be static, so they won't move when hit by a ball.
+
+//The logic behind cuestick-cueball hit, the only human-given force of entire program, 
+//are a set by a vector which is calculated from cueball - mouse position, since "cue stick" are controled by mouse as well. 
+//The vector is then normalized to be a meaningful force with maxForce limit applied
+//to avoid a strong force causing Matter.js collision calculation failed. 
+//Finally, a momentum is applied on cueball by Matter.Body.applyForce when mouserReleased()
+
+
+//EXTENSION
+//I strengthened the game rules part and to make the rule and entire app more interesting just by
+//placing some text on the canvas with conditions set up.
+//Therefore, the player now have cleared idea of how to interact with the apps adn what rules they are offending.
+//For example, if two or more coloured hit in a hole consecutively, a warning will show up until a redball is hit in a hope.
+//Another example, the warning will show up when player try to place cueball in improper place. 
+
+
+//ISSUE TO OVERCOME/IMPROVE IN LATER REDEVELOPEMENT
+//I am actually thinking to make cuestick a Matter.js object as well; however, those automatically applied 
+//collision detections that Matter.js does could be a problem. 
+//The cuestick might just screw up the game whenever it touches a ball, any ball.
+
+//I looked up the Matter.js reference, and found there might be something about collision group control,
+//which could be perfect solution to this issue. With that, I can resconstruct the cuestick and make it only 
+//collision with cueball, then the cueball could be applied force by cuestick movement (controled by mouse position).
+ 
+
+// module aliases
+var Engine = Matter.Engine;
+var Render = Matter.Render;
+var World = Matter.World;
+var Bodies = Matter.Bodies;
+
+var engine;
+var table;
+var redballs = [];
+var colouredballs = [];
+var cueball = [];
+var cushions = [];
+var cuestick;
+var gamemode;
+
+
+var holes = [];
+var redballxy = [];
+var tablewidth;
+var sidewidth;
+var foul;
+
+function setup() {
+  createCanvas(900, 600);
+
+  engine = Engine.create(); // create an engine
+  engine.world.gravity.y = 0; // turn off gravity
+  angleMode(DEGREES);
+  
+
+  tablewidth = width/1.5;
+  sidewidth = tablewidth/60;
+  foul = 0;
+  gamemode = 1;
+
+  createHoles();
+  pushredballxy();
+  resetGame();
+
+}
+///////////////////////////////////////////////////////////
+function draw() {
+  background(0);
+  Engine.update(engine);
+
+  printWords();
+  DrawTable();
+  drawthecushion();
+  drawtheredball();
+  drawthecolouball();
+  drawthecueball();
+  if (cuestick){
+    cuestick.draw();
+  }
+
+  checkinhole(holes,redballs,colouredballs,cueball);
+  
+}
+
+///////////////////Javascript Event///////////////////////////
+function keyPressed(){
+  if (key === "b" || key === "B"){
+    if (cueball.length == 0 && cueballtablecheck()){
+      cueball.push(new CueBall(mouseX, mouseY, tablewidth/72));
+    }
+
+    for (var i = 0; i < cueball.length; i++){
+      World.add(engine.world, cueball[i].body);
+    }
+  } 
+
+  if (key === "1"){
+    gamemode = 1;
+    resetGame();
+  }
+  
+  if (key === "2"){
+    gamemode = 2;
+    resetGame();
+  }
+
+  if (key === "3"){
+    gamemode = 3;
+    resetGame();
+  }
+
+}
+
+function mousePressed(){
+  if(cueball.length == 1 && !cuestick){
+    cuestick = new CueStick(cueball[0]); 
+  }
+}
+
+function mouseDragged(){
+  cuestick.update();
+}
+
+function mouseReleased(){
+  cuestick = null;
+
+  if (cueball.length == 1){
+    applyForceToCueBall(cueball[0],calculateForce(cueball[0],mouseX,mouseY));
+  }
+
+}
+
+
+//print some rule-related text, infused by collision functions
+function printWords(){
+  
+  push();
+  fill("yellow");
+  text("TO START and PLAY a GAME:", width/15, height/13);
+  pop();
+ 
+  
+  push();
+  fill(255);
+  text("> Type 1,2,3 to change game mode", width/15, height/10);
+  pop();
+
+  push();
+  fill(255);
+  text("> Press B to place a cueball", width/15, height/8);
+  pop();
+
+  push();
+  fill(255);
+  text("> After placing a cueball, press mouse to create cue stick", width/15, height/6.7);
+  pop();
+
+  if (foul >= 2){
+    push();
+    fill("red");
+    text("WARNING: two or more non-Red balls fall in pockets consecutively!!", width/2, 4 * height/5);
+    pop();
+  }
+
+  if (!cueballtablecheck()){
+    push();
+    fill("red");
+    text("WARNING: You cannot place cue ball here", width/2, 4 * height/5);
+    pop();
+  }
+
+  if(cueballredballcheck()){
+    push();
+    fill("red");
+    text("WARNING: You should not place cue ball on a red ball", width/2, 4 * height/5);
+    pop();
+  }
+
+  if(cueballcolouredballcheck()){
+    push();
+    fill("red");
+    text("WARNING: You should not place cue ball on a coloured ball", width/2, 4 * height/5);
+    pop();
+  }
+
+
+}
+
+//draw out non-matter.js background table
+function DrawTable(){
+ 
+  //the table 
+  push();
+  rectMode(CENTER);
+  fill(100,150,50);
+  translate(width/2, height/2);
+  rect(0, 0, tablewidth, tablewidth/2);
+  pop();
+
+  //four sides
+  push();
+  rectMode(CENTER);
+  fill(100,0,0);
+  translate(width/2, height/2);
+  rect(-tablewidth/2 + sidewidth/2, 0, sidewidth, tablewidth/2);
+  rect(tablewidth/2 - sidewidth/2, 0, sidewidth, tablewidth/2);
+  rect(0, tablewidth/4 - sidewidth/2, tablewidth, sidewidth);
+  rect(0, -tablewidth/4 + sidewidth/2, tablewidth, sidewidth);
+  pop();
+
+  //advanced sides
+  push();
+  rectMode(CENTER);
+  fill(255,255,0);
+  translate(width/2, height/2);
+  noStroke();
+  
+  //top left
+  rect(-tablewidth/2 + 0.9 * sidewidth, -tablewidth/4 + (((1.5 * sidewidth - (tablewidth/24) / 2) + tablewidth/24)/2), 1.8 * sidewidth, (1.5 * sidewidth - (tablewidth/24)/2) + tablewidth/24);
+  rect(-tablewidth/2 +((2*sidewidth-(tablewidth/24)/2)+tablewidth/24)/2, -tablewidth/4 + 0.9 * sidewidth, 2*sidewidth + (tablewidth/24)/2, 1.8 * sidewidth);
+
+  //top right 
+  rect(tablewidth/2 - 0.9 * sidewidth, -tablewidth/4 + (((1.5 * sidewidth - (tablewidth/24) / 2) + tablewidth/24)/2), 1.8 * sidewidth, (1.5 * sidewidth - (tablewidth/24)/2) + tablewidth/24);
+  rect(tablewidth/2 -((2*sidewidth-(tablewidth/24)/2)+tablewidth/24)/2, -tablewidth/4 + 0.9 * sidewidth, 2*sidewidth + (tablewidth/24)/2, 1.8 * sidewidth);
+
+  //bottom left
+  rect(-tablewidth/2 + 0.9 * sidewidth, tablewidth/4 - (((1.5 * sidewidth - (tablewidth/24) / 2) + tablewidth/24)/2), 1.8 * sidewidth, (1.5 * sidewidth - (tablewidth/24)/2) + tablewidth/24);
+  rect(-tablewidth/2 +((2*sidewidth-(tablewidth/24)/2)+tablewidth/24)/2, tablewidth/4 - 0.9 * sidewidth, 2*sidewidth + (tablewidth/24)/2, 1.8 * sidewidth);
+  
+  //bottom left
+  rect(tablewidth/2 - 0.9 * sidewidth, tablewidth/4 - (((1.5 * sidewidth - (tablewidth/24) / 2) + tablewidth/24)/2), 1.8 * sidewidth, (1.5 * sidewidth - (tablewidth/24)/2) + tablewidth/24);
+  rect(tablewidth/2 -((2*sidewidth-(tablewidth/24)/2)+tablewidth/24)/2, tablewidth/4 - 0.9 * sidewidth, 2*sidewidth + (tablewidth/24)/2, 1.8 * sidewidth);
+  pop();
+
+
+
+  //the holes
+  push();
+  fill(0);
+  translate(width / 2, height / 2);
+  
+  for (var i = 0; i < holes.length; i++) {
+    var hole = holes[i];
+    ellipse(hole.x, hole.y, tablewidth / 24);
+  }
+  pop();
+
+
+//draw the line on the table 
+  push();
+  stroke(255);
+  translate(width/2, height/2);
+  line(-tablewidth/4, tablewidth/4 - (1.8 * sidewidth), -tablewidth/4, -tablewidth/4 + (1.8 * sidewidth));
+  pop();
+
+//draw the arc
+  push();
+  noFill();
+  stroke(255);
+  translate(width/2, height/2);
+//remember this parameter for later placing colour balls 
+  angleMode(RADIANS);
+  arc(-tablewidth/4, 0, tablewidth/6, tablewidth/6, PI / 2, -PI / 2);
+  pop();
+
+}
+
+//for pushing holes x,y value
+function createHoles() {
+// later can be using for check if ball is in the hole
+  holes.push(createVector(-tablewidth / 2 + 2 * sidewidth, -tablewidth / 4 + 1.5 * sidewidth));
+  holes.push(createVector(tablewidth / 2 - 2 * sidewidth, -tablewidth / 4 + 1.5 * sidewidth));
+  holes.push(createVector(-tablewidth / 2 + 2 * sidewidth, tablewidth / 4 - 1.5 * sidewidth));
+  holes.push(createVector(tablewidth / 2 - 2 * sidewidth, tablewidth / 4 - 1.5 * sidewidth));
+  
+  // For the middle holes
+  holes.push(createVector(0, -tablewidth / 4 + 1.5 * sidewidth));
+  holes.push(createVector(0, tablewidth / 4 - 1.5 * sidewidth));
+}
+
+
+
+//Matter.js objects Setup
+function resetGame(){
+  World.clear(engine.world);
+  cushions = [];
+  colouredballs = [];
+  cueball = [];
+  redballs = [];
+  foul = 0;
+
+  setupcushions();
+
+  if (gamemode == 1){
+    setupGame1Redballs();
+    setupGame12Colouredballs();
+  }
+
+  if (gamemode == 2){
+    setupGame23Redballs();
+    setupGame12Colouredballs();
+  }
+
+  if (gamemode == 3){
+    setupGame23Redballs();
+    setupGame3Colouredballs();
+  }
+
+
+
+}
+
+function pushredballxy(){
+  //for game mode one redballs create 
+  //remember to set angle mode later
+  var initialx = width/2 + tablewidth/4;  
+  var initialy = height/2;
+  var radius = tablewidth/72;
+  var redballx = [];
+  var redbally = [];
+  var tempx = 0;
+  var tempy = 0;
+  var x = 0;
+  var y = 0;
+
+//use trinometry to creates x,y coordinates 
+  for (var i = 5; i > 0; i--){
+    var d = 5 - i;
+    tempx = initialx + d * (2 * radius) * cos(30);
+    for (var j = 0; j < i; j++){
+      x = tempx + j * (2 * radius) * cos(30);
+      redballx.push(x);
+    }
+  }
+
+  for (var i = 5; i > 0 ; i--){
+    var d = 5 - i;
+    tempy = initialy + d * (2 * radius) * sin(30);
+    for (var j = 0; j < i; j++){
+      y = tempy - j * (2 * radius) * sin(30);
+      redbally.push(y);
+    }
+  }  
+
+  for (var i = 0; i < redballx.length; i++){
+    redballxy.push([redballx[i],redbally[i]]);
+  }
+}  
+
+function setupGame1Redballs(){ 
+  for (var i = 0; i < redballxy.length; i++){
+    redballs.push(new RedBall(redballxy[i][0],redballxy[i][1],tablewidth/72));
+  }
+
+  for (var i = 0; i < redballs.length; i++){
+    World.add(engine.world, redballs[i].body);
+  }
+}
+
+function setupGame23Redballs(){
+  for (var i = 0; i < 15; i++){
+    redballs.push(new RedBall(random(width/2 - tablewidth/2 + 3 * sidewidth, width/2 + tablewidth/2 - 3 * sidewidth)
+    ,random(height/2 - tablewidth/4 + 3 * sidewidth, height/2 + tablewidth/4 - 3 * sidewidth), tablewidth/72)); 
+  }
+
+  for (var i = 0; i < redballs.length; i++){
+    World.add(engine.world, redballs[i].body);
+  }
+}
+
+function setupGame12Colouredballs(){
+  colouredballs.push(new ColouredBall(width/2, height/2, tablewidth/72, "blue"));
+  colouredballs.push(new ColouredBall(width/2 + tablewidth/2 - 5 * sidewidth, height/2, tablewidth/72, "black"));
+  colouredballs.push(new ColouredBall(width/2 - tablewidth/4, height/2, tablewidth/72, "orange"));
+  colouredballs.push(new ColouredBall(width/2 - tablewidth/4, height/2 - tablewidth/12, tablewidth/72, "green"));
+  colouredballs.push(new ColouredBall(width/2 - tablewidth/4, height/2 + tablewidth/12, tablewidth/72, "yellow"));
+
+  for (var i = 0; i < colouredballs.length; i++){
+    World.add(engine.world, colouredballs[i].body);
+  }
+
+}
+
+function setupGame3Colouredballs(){
+  var colours = ["blue","black","orange","green","yellow"];
+
+  for (var i = 0; i < colours.length; i++){
+    colouredballs.push(new ColouredBall(random(width/2 - tablewidth/2 + 3 * sidewidth, width/2 + tablewidth/2 - 3 * sidewidth)
+    ,random(height/2 - tablewidth/4 + 3 * sidewidth, height/2 + tablewidth/4 - 3 * sidewidth), tablewidth/72, colours[i]));  
+  
+  }
+
+  for (var i = 0; i < colouredballs.length; i++){
+    World.add(engine.world, colouredballs[i].body);
+  }
+
+}
+
+function setupcushions(){
+
+  cushions.push(new Cushion(-tablewidth/2 + (1.4 * sidewidth) + width/2, 0 + height/2, sidewidth*0.8 ,tablewidth/2 - tablewidth/12 - sidewidth*0.7));
+  cushions.push(new Cushion(tablewidth/2 - (1.4 * sidewidth) + width/2, 0 + height/2, sidewidth*0.8 ,tablewidth/2 - tablewidth/12 - sidewidth*0.7));
+  cushions.push(new Cushion(-tablewidth/4 + sidewidth + width/2, -tablewidth/4 + (1.4 * sidewidth) + height/2, tablewidth/2 - tablewidth/24 - sidewidth * 2, sidewidth * 0.8));
+  cushions.push(new Cushion(tablewidth/4 - sidewidth + width/2, -tablewidth/4 + (1.4 * sidewidth) + height/2, tablewidth/2 - tablewidth/24 - sidewidth * 2, sidewidth * 0.8));
+  cushions.push(new Cushion(-tablewidth/4 + sidewidth + width/2, tablewidth/4 - (1.4 * sidewidth) + height/2, tablewidth/2 - tablewidth/24 - sidewidth * 2, sidewidth * 0.8));
+  cushions.push(new Cushion(tablewidth/4 - sidewidth + width/2, tablewidth/4 - (1.4 * sidewidth) + height/2, tablewidth/2 - tablewidth/24 - sidewidth * 2, sidewidth * 0.8));
+  
+
+  for (var i = 0; i < cushions.length; i++){
+    World.add(engine.world, cushions[i].body);
+  }
+
+}
+
+
+
+//draw out matter.js objecs
+
+function drawthecushion(){
+  for (var i = 0; i < cushions.length; i++) {
+    cushions[i].draw();
+  }
+}
+
+function drawtheredball(){
+  for (var i = 0; i < redballs.length; i++){
+    redballs[i].draw();
+  }
+}
+
+function drawthecolouball(){
+  for (var i = 0; i < colouredballs.length; i++){
+    colouredballs[i].draw();
+  }
+}
+
+function drawthecueball(){
+  for (var i = 0; i < cueball.length; i++){
+    cueball[i].draw();
+  }
+}
+
+
+//force apply to the cueball by cueball.position and mouseX and mouseY 
+
+function calculateForce(cueBall, mouseX, mouseY){
+  var cueBallPosition = cueBall.body.position;
+  var forceDirection = createVector(cueBallPosition.x - mouseX , cueBallPosition.y - mouseY);
+  
+  var maxForce = 0.01;
+  
+  forceDirection.normalize();
+  forceDirection.mult(0.004);
+  forceDirection.limit(maxForce);
+
+  return forceDirection;
+}
+
+function applyForceToCueBall(cueBall,force){
+  Matter.Body.applyForce(cueBall.body, cueBall.body.position, force);
+
+}
+
+
+
+
+///////////////////game rule parts/////////////////
+
+
+function checkinhole(holes,redballs,colouredballs,cueball){
+  for (var i = 0; i < holes.length; i++){
+    //check for redballs in hole
+    for (var j = redballs.length - 1; j >= 0; j--) {
+      if (
+        redballs[j].body.position.x > width/2 + holes[i].x - tablewidth / 48 &&
+        redballs[j].body.position.x < width/2 + holes[i].x + tablewidth / 48 &&
+        redballs[j].body.position.y > height/2 + holes[i].y - tablewidth / 48 &&
+        redballs[j].body.position.y < height/2 + holes[i].y + tablewidth / 48
+      ) {
+        // Remove the redball from the array and from the world
+        World.remove(engine.world, redballs[j]);
+        redballs.splice(j, 1);
+        foul = 0;
+      }
+    }  
+
+
+
+    for (var c = colouredballs.length - 1; c >= 0; c--){
+      if (
+        colouredballs[c].body.position.x > width/2 + holes[i].x - tablewidth / 48 &&
+        colouredballs[c].body.position.x < width/2 + holes[i].x + tablewidth / 48 &&
+        colouredballs[c].body.position.y > height/2 + holes[i].y - tablewidth / 48 &&
+        colouredballs[c].body.position.y < height/2 + holes[i].y + tablewidth / 48
+      ) {
+        // Push a new coloured ball, and Remove the ball from the array and from the world
+        if (colouredballs[c].color == "blue"){
+          var newColouredBall = new ColouredBall(width/2, height/2, tablewidth/72, "blue");
+          colouredballs.push(newColouredBall);
+          World.add(engine.world, newColouredBall.body);
+        }
+
+        if (colouredballs[c].color == "black"){
+          var newColouredBall = new ColouredBall(width/2 + tablewidth/2 - 5 * sidewidth, height/2, tablewidth/72, "black");
+          colouredballs.push(newColouredBall);
+          World.add(engine.world, newColouredBall.body);
+        }
+
+        if (colouredballs[c].color == "orange"){
+          var newColouredBall = new ColouredBall(width/2 - tablewidth/4, height/2, tablewidth/72, "orange");
+          colouredballs.push(newColouredBall);
+          World.add(engine.world, newColouredBall.body);
+        }
+
+        if (colouredballs[c].color == "green"){
+          var newColouredBall = new ColouredBall(width/2 - tablewidth/4, height/2 - tablewidth/12, tablewidth/72, "green");
+          colouredballs.push(newColouredBall);
+          World.add(engine.world, newColouredBall.body);
+        }
+
+        if (colouredballs[c].color == "yellow"){
+          var newColouredBall = new ColouredBall(width/2 - tablewidth/4, height/2 + tablewidth/12, tablewidth/72, "yellow");
+          colouredballs.push(newColouredBall);
+          World.add(engine.world, newColouredBall.body);
+        }
+
+        World.remove(engine.world, colouredballs[c]);
+        colouredballs.splice(c, 1);
+        foul = foul + 1;
+      }
+    }
+
+    for (var b = 0; b < cueball.length; b++){
+      if (
+        cueball[b].body.position.x > width/2 + holes[i].x - tablewidth / 48 &&
+        cueball[b].body.position.x < width/2 + holes[i].x + tablewidth / 48 &&
+        cueball[b].body.position.y > height/2 + holes[i].y - tablewidth / 48 &&
+        cueball[b].body.position.y < height/2 + holes[i].y + tablewidth / 48
+      ) {
+        
+        World.remove(engine.world, cueball[b]);
+        cueball.splice(b,1);
+      }
+    } 
+
+  }
+}
+
+function cueballtablecheck(){
+  if (cueball.length == 0 && mouseX < width/2 + tablewidth/2 - 2 * sidewidth 
+  && mouseX > width/2 - tablewidth/2 + 2* sidewidth 
+  && mouseY > height/2 - tablewidth/4 + 2 * sidewidth 
+  && mouseY < height/2 + tablewidth/4 - 2 * sidewidth){
+    return true 
+  } 
+
+  else if (cueball.length !== 0){
+    return true
+  }
+
+  return false
+}
+
+function cueballredballcheck(){
+  for (var i = 0; i < redballs.length; i++){
+    if (cueball.length == 0 && mouseX < redballs[i].body.position.x + tablewidth/72
+    && mouseX > redballs[i].body.position.x - tablewidth/72
+    && mouseY > redballs[i].body.position.y - tablewidth/72
+    && mouseY < redballs[i].body.position.y + tablewidth/72){
+      return true
+    }
+  }
+
+  return false;
+
+}
+
+function cueballcolouredballcheck(){
+  for (var i = 0; i < colouredballs.length; i++){
+    if (cueball.length == 0 && mouseX < colouredballs[i].body.position.x + tablewidth/72
+    && mouseX > colouredballs[i].body.position.x - tablewidth/72
+    && mouseY > colouredballs[i].body.position.y - tablewidth/72
+    && mouseY < colouredballs[i].body.position.y + tablewidth/72){
+      return true
+    }
+  }
+  
+  return false;
+
+}
+
+
